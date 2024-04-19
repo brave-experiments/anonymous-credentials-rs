@@ -1,5 +1,6 @@
 mod data;
 mod join;
+mod sign;
 mod util;
 
 use brave_miracl::{bn254::big, rand::RAND};
@@ -7,20 +8,23 @@ use rand::{rngs::OsRng, RngCore};
 use thiserror::Error;
 
 use self::data::{
-    CredentialBIG, GroupPublicKey, JoinResponse, StartJoinResult, UserCredentials,
-    ECP2_COMPAT_BYTES_SIZE, ECP_BYTES_SIZE, GROUP_PUBLIC_KEY_SIZE, JOIN_RESPONSE_SIZE,
+    CredentialBIG, GroupPublicKey, JoinResponse, Signature, StartJoinResult, UserCredentials,
+    ECP2_COMPAT_SIZE, ECP_PROOF_SIZE, ECP_SIZE, GROUP_PUBLIC_KEY_SIZE, JOIN_RESPONSE_SIZE,
     USER_CREDENTIALS_SIZE,
 };
-use self::join::{join_client_internal, join_finish_client_internal};
+use self::join::{finish_join, start_join};
+use self::sign::sign;
 
 #[derive(Error, Debug)]
 pub enum CredentialError {
-    #[error("ECP should be {0} bytes", ECP_BYTES_SIZE)]
+    #[error("ECP should be {0} bytes", ECP_SIZE)]
     BadECP,
-    #[error("ECP2 should be {0} bytes", ECP2_COMPAT_BYTES_SIZE)]
+    #[error("ECP2 should be {0} bytes", ECP2_COMPAT_SIZE)]
     BadECP2,
     #[error("BIG should be {0} bytes", big::MODBYTES)]
     BadBIG,
+    #[error("ECP proof should be {0} bytes", ECP_PROOF_SIZE)]
+    BadECPProof,
     #[error("User credentials should be {0} bytes", USER_CREDENTIALS_SIZE)]
     BadUserCredentials,
     #[error("Join response should be {0} bytes", JOIN_RESPONSE_SIZE)]
@@ -29,12 +33,15 @@ pub enum CredentialError {
     GroupPublicKeyLength,
     #[error("Join response validation failed")]
     JoinResponseValidation,
+    #[error("Private key and/or credentials not set")]
+    CredentialsNotSet,
 }
 
 pub type Result<T> = std::result::Result<T, CredentialError>;
 
 pub struct CredentialManager {
     rng: RAND,
+    gsk_and_credentials: Option<(CredentialBIG, UserCredentials)>,
 }
 
 impl CredentialManager {
@@ -49,11 +56,14 @@ impl CredentialManager {
 
         rng.seed(entropy.len(), entropy);
 
-        Self { rng }
+        Self {
+            rng,
+            gsk_and_credentials: None,
+        }
     }
 
     pub fn start_join(&mut self, challenge: &[u8]) -> StartJoinResult {
-        join_client_internal(&mut self.rng, challenge)
+        start_join(&mut self.rng, challenge)
     }
 
     pub fn finish_join(
@@ -62,7 +72,18 @@ impl CredentialManager {
         gsk: &CredentialBIG,
         join_resp: JoinResponse,
     ) -> Result<UserCredentials> {
-        join_finish_client_internal(public_key, gsk, join_resp)
+        finish_join(public_key, gsk, join_resp)
+    }
+
+    pub fn set_gsk_and_credentials(&mut self, gsk: CredentialBIG, credentials: UserCredentials) {
+        self.gsk_and_credentials = Some((gsk, credentials));
+    }
+
+    pub fn sign(&mut self, msg: &[u8], basename: &[u8]) -> Result<Signature> {
+        match &self.gsk_and_credentials {
+            Some((gsk, credentials)) => Ok(sign(&mut self.rng, gsk, credentials, msg, basename)),
+            None => Err(CredentialError::CredentialsNotSet),
+        }
     }
 }
 
@@ -90,18 +111,34 @@ mod tests {
             c9a6a5e0296377bd1cf1b722bc4d375ae8aa4761b7aac5a50e9871"
         )
         .unwrap();
+        static ref EXPECTED_CREDENTIALS: Vec<u8> = hex::decode(
+            "04246220e5a9d48d359178c9e0994cc10f7288b50\
+            cd059c24c5a26fc5919682e8017b66ca6185d62bf2\
+            bed7cf02503157ab93ff79d8d34ab3c48669954b7e\
+            2b69c041d98fde59abcd8c0f22790e8d40e253c124\
+            0f3697c161d18a9d04ca24ba2b01f0d100b28b3d52\
+            9939ec717f4f39e114337878f03c9066afc2250332\
+            76f162b4904248822cb548ccb8167480e23f019813\
+            4d1547b005ac84c2a7101a4d39c924ee50298022d7\
+            dd7c9f0006eab2576635a36af81e0f781437c4ee35\
+            b8672511089830401074ad73c4e9e9aed541bdc5a2\
+            df2ee815a3ac4f6297b73da35db2a646e19720475c\
+            fe50eb2465833b50758f6c8f09fdf645643a4b3ef5\
+            bd494be6a551768c8",
+        )
+        .unwrap();
     }
 
     const CHALLENGE: &[u8] = b"challenge";
 
-    fn new_credential_manager() -> CredentialManager {
+    fn manager_with_fixed_seed() -> CredentialManager {
         let entropy = [0u8; 1];
         CredentialManager::new_with_seed(&entropy)
     }
 
     #[test]
     fn test_gsk_and_join_msg() {
-        let mut cm = new_credential_manager();
+        let mut cm = manager_with_fixed_seed();
         let result = cm.start_join(CHALLENGE);
 
         let expected_join_msg = hex::decode(
@@ -121,7 +158,7 @@ mod tests {
 
     #[test]
     fn test_finish_join_credentials() {
-        let mut cm = new_credential_manager();
+        let mut cm = manager_with_fixed_seed();
 
         let group_pub_key: GroupPublicKey = GROUP_PUB_KEY.as_slice().try_into().unwrap();
         let gsk: CredentialBIG = EXPECTED_GSK.as_slice().try_into().unwrap();
@@ -153,23 +190,41 @@ mod tests {
             .unwrap()
             .to_bytes();
 
-        let expected_credentials = hex::decode(
-            "04246220e5a9d48d359178c9e0994cc10f7288b50\
-            cd059c24c5a26fc5919682e8017b66ca6185d62bf2\
-            bed7cf02503157ab93ff79d8d34ab3c48669954b7e\
-            2b69c041d98fde59abcd8c0f22790e8d40e253c124\
-            0f3697c161d18a9d04ca24ba2b01f0d100b28b3d52\
-            9939ec717f4f39e114337878f03c9066afc2250332\
-            76f162b4904248822cb548ccb8167480e23f019813\
-            4d1547b005ac84c2a7101a4d39c924ee50298022d7\
-            dd7c9f0006eab2576635a36af81e0f781437c4ee35\
-            b8672511089830401074ad73c4e9e9aed541bdc5a2\
-            df2ee815a3ac4f6297b73da35db2a646e19720475c\
-            fe50eb2465833b50758f6c8f09fdf645643a4b3ef5\
-            bd494be6a551768c8",
+        assert_eq!(credentials.as_slice(), EXPECTED_CREDENTIALS.as_slice());
+    }
+
+    #[test]
+    fn test_signature() {
+        let mut cm = manager_with_fixed_seed();
+
+        let gsk = EXPECTED_GSK.as_slice().try_into().unwrap();
+        let credentials = EXPECTED_CREDENTIALS.as_slice().try_into().unwrap();
+        cm.set_gsk_and_credentials(gsk, credentials);
+
+        let expected_signature = hex::decode(
+            "0406cb022fcc3dcaef1e4c62dad349bfd263581126c\
+            f17b293d1a41e4d96f840da00ad85e4a97aad1247a19\
+            a425da6f96978fdac180136f0f486bad0fce0a9ada20\
+            401074ad73c4e9e9aed541bdc5a2df2ee815a3ac4f62\
+            97b73da35db2a646e19720475cfe50eb2465833b5075\
+            8f6c8f09fdf645643a4b3ef5bd494be6a551768c8042\
+            4a006154937bcd3b8f94f12a4672d9a9411928846adc\
+            9132737600089a65915121160cbd4e417435e4acfe66\
+            57840c50584bc8dca420544879fe7fe9c03bc0f0418e\
+            e65a71c262c5301d782b20e7f3f252e938282b98a2f8\
+            6a7447e2aa424005819835a0a954d4f6dc53ae4c8bad\
+            2d192a70fcb8883403f69989e43ff66caad0104208cd\
+            8eb5e25486eb754e44f4e2f3b6f5153f5aa73d7eab8c\
+            2f5c867a157276b0463ced7f409f86ef91a4548cf4bb\
+            519392cd657505475e585a3ea0348b6266b1fd3d4ab1\
+            253392386bf2f08afe36072abe575e07865272c3014a\
+            b067f5051181fe574571f34d278e2c9359294ca44aa3\
+            3568c546082e4e8d921541e5ccc6c81",
         )
         .unwrap();
 
-        assert_eq!(credentials.as_slice(), &expected_credentials);
+        let signature_bytes = cm.sign(b"message", b"basename").unwrap().to_bytes();
+
+        assert_eq!(signature_bytes, expected_signature.as_slice());
     }
 }

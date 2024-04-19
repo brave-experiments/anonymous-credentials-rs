@@ -7,25 +7,25 @@ use brave_miracl::bn254::{
 
 use super::CredentialError;
 
-pub const ECP_BYTES_SIZE: usize = big::MODBYTES * 2 + 1;
-pub const ECP2_COMPAT_BYTES_SIZE: usize = big::MODBYTES * 4;
+pub const ECP_SIZE: usize = big::MODBYTES * 2 + 1;
+pub const ECP2_COMPAT_SIZE: usize = big::MODBYTES * 4;
 
-pub const JOIN_REQUEST_SIZE: usize = ECP_BYTES_SIZE + (big::MODBYTES * 2);
-pub const USER_CREDENTIALS_SIZE: usize = ECP_BYTES_SIZE * 4;
-pub const JOIN_RESPONSE_SIZE: usize = USER_CREDENTIALS_SIZE + (big::MODBYTES * 2);
-pub const GROUP_PUBLIC_KEY_SIZE: usize = (ECP2_COMPAT_BYTES_SIZE * 2) + (big::MODBYTES * 4);
+pub const ECP_PROOF_SIZE: usize = big::MODBYTES * 2;
+pub const JOIN_REQUEST_SIZE: usize = ECP_SIZE + ECP_PROOF_SIZE;
+pub const USER_CREDENTIALS_SIZE: usize = ECP_SIZE * 4;
+pub const JOIN_RESPONSE_SIZE: usize = USER_CREDENTIALS_SIZE + ECP_PROOF_SIZE;
+pub const GROUP_PUBLIC_KEY_SIZE: usize = ECP2_COMPAT_SIZE * 2 + big::MODBYTES * 4;
+pub const SIGNATURE_SIZE: usize = ECP_SIZE * 5 + ECP_PROOF_SIZE;
 
 pub struct JoinRequest {
     pub q: ECP, // G1 ** gsk
 
-    pub c: BIG,
-    pub s: BIG,
+    pub proof: ECPProof,
 }
 
 pub struct JoinResponse {
     pub cred: UserCredentials,
-    pub c: BIG,
-    pub s: BIG,
+    pub proof: ECPProof,
 }
 
 pub struct UserCredentials {
@@ -33,6 +33,16 @@ pub struct UserCredentials {
     pub b: ECP,
     pub c: ECP,
     pub d: ECP,
+}
+
+pub struct Signature {
+    pub a: ECP,
+    pub b: ECP,
+    pub c: ECP,
+    pub d: ECP,
+    pub nym: ECP,
+
+    pub proof: ECPProof,
 }
 
 pub struct GroupPublicKey {
@@ -59,14 +69,14 @@ pub struct StartJoinResult {
 }
 
 pub fn ecp_from_bytes(bytes: &[u8]) -> Result<ECP, CredentialError> {
-    if bytes.len() != ECP_BYTES_SIZE {
+    if bytes.len() != ECP_SIZE {
         return Err(CredentialError::BadECP);
     }
     Ok(ECP::frombytes(bytes))
 }
 
 pub fn ecp2_from_compat_bytes(bytes: &[u8]) -> Result<ECP2, CredentialError> {
-    if bytes.len() != ECP2_COMPAT_BYTES_SIZE {
+    if bytes.len() != ECP2_COMPAT_SIZE {
         return Err(CredentialError::BadECP2);
     }
     let x = FP2::new_bigs(
@@ -97,10 +107,7 @@ impl TryFrom<&[u8]> for JoinResponse {
 
         Ok(JoinResponse {
             cred: bytes[..USER_CREDENTIALS_SIZE].try_into()?,
-            c: big_from_bytes(
-                &bytes[USER_CREDENTIALS_SIZE..big::MODBYTES + USER_CREDENTIALS_SIZE],
-            )?,
-            s: big_from_bytes(&bytes[USER_CREDENTIALS_SIZE + big::MODBYTES..])?,
+            proof: bytes[USER_CREDENTIALS_SIZE..].try_into()?,
         })
     }
 }
@@ -113,10 +120,10 @@ impl TryFrom<&[u8]> for UserCredentials {
             return Err(CredentialError::BadUserCredentials);
         }
         Ok(UserCredentials {
-            a: ecp_from_bytes(&bytes[..ECP_BYTES_SIZE])?,
-            b: ecp_from_bytes(&bytes[ECP_BYTES_SIZE..ECP_BYTES_SIZE * 2])?,
-            c: ecp_from_bytes(&bytes[ECP_BYTES_SIZE * 2..ECP_BYTES_SIZE * 3])?,
-            d: ecp_from_bytes(&bytes[ECP_BYTES_SIZE * 3..ECP_BYTES_SIZE * 4])?,
+            a: ecp_from_bytes(&bytes[..ECP_SIZE])?,
+            b: ecp_from_bytes(&bytes[ECP_SIZE..ECP_SIZE * 2])?,
+            c: ecp_from_bytes(&bytes[ECP_SIZE * 2..ECP_SIZE * 3])?,
+            d: ecp_from_bytes(&bytes[ECP_SIZE * 3..ECP_SIZE * 4])?,
         })
     }
 }
@@ -129,11 +136,11 @@ impl TryFrom<&[u8]> for GroupPublicKey {
             return Err(CredentialError::GroupPublicKeyLength);
         }
 
-        let big_start = ECP2_COMPAT_BYTES_SIZE * 2;
+        let big_start = ECP2_COMPAT_SIZE * 2;
 
         Ok(GroupPublicKey {
-            x: ecp2_from_compat_bytes(&bytes[..ECP2_COMPAT_BYTES_SIZE])?,
-            y: ecp2_from_compat_bytes(&bytes[ECP2_COMPAT_BYTES_SIZE..ECP2_COMPAT_BYTES_SIZE * 2])?,
+            x: ecp2_from_compat_bytes(&bytes[..ECP2_COMPAT_SIZE])?,
+            y: ecp2_from_compat_bytes(&bytes[ECP2_COMPAT_SIZE..ECP2_COMPAT_SIZE * 2])?,
             cx: big_from_bytes(&bytes[big_start..big_start + big::MODBYTES])?,
             sx: big_from_bytes(&bytes[big_start + big::MODBYTES..big_start + big::MODBYTES * 2])?,
             cy: big_from_bytes(
@@ -166,9 +173,7 @@ impl JoinRequest {
     pub fn to_bytes(&self) -> [u8; JOIN_REQUEST_SIZE] {
         let mut result = [0u8; JOIN_REQUEST_SIZE];
         self.q.tobytes(&mut result, false);
-        self.c.tobytes(&mut result[ECP_BYTES_SIZE..]);
-        self.s
-            .tobytes(&mut result[ECP_BYTES_SIZE + big::MODBYTES..]);
+        result[ECP_SIZE..].copy_from_slice(&self.proof.to_bytes());
         result
     }
 }
@@ -176,13 +181,52 @@ impl JoinRequest {
 impl UserCredentials {
     pub fn to_bytes(&self) -> [u8; USER_CREDENTIALS_SIZE] {
         let mut result = [0u8; USER_CREDENTIALS_SIZE];
-        self.a.tobytes(&mut result[..ECP_BYTES_SIZE], false);
-        self.b
-            .tobytes(&mut result[ECP_BYTES_SIZE..ECP_BYTES_SIZE * 2], false);
+        self.a.tobytes(&mut result[..ECP_SIZE], false);
+        self.b.tobytes(&mut result[ECP_SIZE..ECP_SIZE * 2], false);
         self.c
-            .tobytes(&mut result[ECP_BYTES_SIZE * 2..ECP_BYTES_SIZE * 3], false);
+            .tobytes(&mut result[ECP_SIZE * 2..ECP_SIZE * 3], false);
         self.d
-            .tobytes(&mut result[ECP_BYTES_SIZE * 3..ECP_BYTES_SIZE * 4], false);
+            .tobytes(&mut result[ECP_SIZE * 3..ECP_SIZE * 4], false);
+        result
+    }
+}
+
+impl ECPProof {
+    pub fn to_bytes(&self) -> [u8; ECP_PROOF_SIZE] {
+        let mut result = [0u8; ECP_PROOF_SIZE];
+        self.c.tobytes(&mut result[..big::MODBYTES]);
+        self.s.tobytes(&mut result[big::MODBYTES..]);
+        result
+    }
+}
+
+impl TryFrom<&[u8]> for ECPProof {
+    type Error = CredentialError;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        if bytes.len() != ECP_PROOF_SIZE {
+            return Err(CredentialError::BadECPProof);
+        }
+
+        Ok(ECPProof {
+            c: big_from_bytes(&bytes[0..big::MODBYTES])?,
+            s: big_from_bytes(&bytes[big::MODBYTES..])?,
+        })
+    }
+}
+
+impl Signature {
+    pub fn to_bytes(&self) -> [u8; SIGNATURE_SIZE] {
+        let mut result = [0u8; SIGNATURE_SIZE];
+        self.a.tobytes(&mut result[..ECP_SIZE], false);
+        self.b.tobytes(&mut result[ECP_SIZE..ECP_SIZE * 2], false);
+        self.c
+            .tobytes(&mut result[ECP_SIZE * 2..ECP_SIZE * 3], false);
+        self.d
+            .tobytes(&mut result[ECP_SIZE * 3..ECP_SIZE * 4], false);
+        self.nym
+            .tobytes(&mut result[ECP_SIZE * 4..ECP_SIZE * 5], false);
+        result[ECP_SIZE * 5..].copy_from_slice(&self.proof.to_bytes());
         result
     }
 }

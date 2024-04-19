@@ -10,57 +10,26 @@ use brave_miracl::{
 };
 
 use super::util::{
-    hash256, pair_normalized_triple_ate, random_mod_curve_order, CURVE_ORDER_BIG, G1_ECP, G2_ECP,
+    ecp_challenge_equals, hash256, pair_normalized_triple_ate, random_mod_curve_order,
+    CURVE_ORDER_BIG, G1_ECP, G2_ECP,
 };
 use super::Result;
 use super::{
     data::{
         CredentialBIG, ECPProof, GroupPublicKey, JoinRequest, JoinResponse, StartJoinResult,
-        UserCredentials, ECP_BYTES_SIZE,
+        UserCredentials, ECP_SIZE,
     },
     CredentialError,
 };
 
 fn ecp_challenge(message: &[u8; big::MODBYTES], y: &ECP, g: &ECP, gr: &ECP) -> BIG {
-    let mut all_bytes = [0u8; ECP_BYTES_SIZE * 3 + big::MODBYTES];
+    let mut all_bytes = [0u8; ECP_SIZE * 3 + big::MODBYTES];
 
     all_bytes[..big::MODBYTES].copy_from_slice(message);
 
     y.tobytes(&mut all_bytes[big::MODBYTES..], false);
-    g.tobytes(&mut all_bytes[ECP_BYTES_SIZE + big::MODBYTES..], false);
-    gr.tobytes(&mut all_bytes[ECP_BYTES_SIZE * 2 + big::MODBYTES..], false);
-
-    let hash = hash256(&all_bytes);
-
-    let mut c = BIG::frombytes(&hash);
-    c.rmod(&CURVE_ORDER_BIG);
-    c
-}
-
-fn ecp_challenge_equals(
-    message: Option<&[u8; big::MODBYTES]>,
-    y: &ECP,
-    z: &ECP,
-    a: &ECP,
-    b: &ECP,
-    ar: &ECP,
-    br: &ECP,
-) -> BIG {
-    let (mut all_bytes, msg_len) = match message {
-        Some(message) => {
-            let mut all_bytes = vec![0u8; ECP_BYTES_SIZE * 6];
-            all_bytes[..big::MODBYTES].copy_from_slice(message);
-            (all_bytes, message.len())
-        }
-        None => (vec![0u8; ECP_BYTES_SIZE * 6], 0),
-    };
-
-    y.tobytes(&mut all_bytes[msg_len..], false);
-    z.tobytes(&mut all_bytes[msg_len + ECP_BYTES_SIZE..], false);
-    a.tobytes(&mut all_bytes[msg_len + ECP_BYTES_SIZE * 2..], false);
-    b.tobytes(&mut all_bytes[msg_len + ECP_BYTES_SIZE * 3..], false);
-    ar.tobytes(&mut all_bytes[msg_len + ECP_BYTES_SIZE * 4..], false);
-    br.tobytes(&mut all_bytes[msg_len + ECP_BYTES_SIZE * 5..], false);
+    g.tobytes(&mut all_bytes[ECP_SIZE + big::MODBYTES..], false);
+    gr.tobytes(&mut all_bytes[ECP_SIZE * 2 + big::MODBYTES..], false);
 
     let hash = hash256(&all_bytes);
 
@@ -81,34 +50,12 @@ fn make_ecp_proof(rng: &mut RAND, y: &ECP, x: &BIG, message: &[u8; big::MODBYTES
     ECPProof { c, s }
 }
 
-fn make_ecp_proof_equals(
-    rng: &mut RAND,
-    message: &[u8; big::MODBYTES],
-    a: &ECP,
-    b: &ECP,
-    y: &ECP,
-    z: &ECP,
-    x: &BIG,
-) -> ECPProof {
-    let r = random_mod_curve_order(rng);
+fn verify_ecp_proof_equals(a: &ECP, b: &ECP, y: &ECP, z: &ECP, proof: &ECPProof) -> bool {
+    let cn = BIG::modneg(&proof.c, &CURVE_ORDER_BIG);
 
-    let ar = g1mul(&a, &r);
-    let br = g1mul(&b, &r);
-
-    let c = ecp_challenge_equals(Some(message), y, z, a, b, &ar, &br);
-    let mut s = BIG::modmul(&c, x, &CURVE_ORDER_BIG);
-    s.add(&r);
-    s.rmod(&CURVE_ORDER_BIG);
-
-    ECPProof { c, s }
-}
-
-fn verify_ecp_proof_equals(a: &ECP, b: &ECP, y: &ECP, z: &ECP, c: &BIG, s: &BIG) -> bool {
-    let cn = BIG::modneg(c, &CURVE_ORDER_BIG);
-
-    let mut r#as = g1mul(a, s);
+    let mut r#as = g1mul(a, &proof.s);
     let yc = g1mul(y, &cn);
-    let mut bs = g1mul(b, s);
+    let mut bs = g1mul(b, &proof.s);
     let zc = g1mul(z, &cn);
 
     r#as.add(&yc);
@@ -116,7 +63,7 @@ fn verify_ecp_proof_equals(a: &ECP, b: &ECP, y: &ECP, z: &ECP, c: &BIG, s: &BIG)
 
     let cc = ecp_challenge_equals(None, &y, &z, &a, &b, &r#as, &bs);
 
-    BIG::comp(c, &cc) == 0
+    BIG::comp(&proof.c, &cc) == 0
 }
 
 fn verify_aux_fast(a: &ECP, b: &ECP, c: &ECP, d: &ECP, x: &ECP2, y: &ECP2, rng: &mut RAND) -> bool {
@@ -155,28 +102,21 @@ fn verify_aux_fast(a: &ECP, b: &ECP, c: &ECP, d: &ECP, x: &ECP2, y: &ECP2, rng: 
     w.equals(&fp12_one)
 }
 
-pub fn join_client_internal(rng: &mut RAND, challenge: &[u8]) -> StartJoinResult {
-    let mut join_msg = JoinRequest {
-        q: G1_ECP.clone(),
-        c: BIG::new(),
-        s: BIG::new(),
-    };
+pub fn start_join(rng: &mut RAND, challenge: &[u8]) -> StartJoinResult {
     let gsk = random_mod_curve_order(rng);
-    join_msg.q = g1mul(&join_msg.q, &gsk);
+    let q = g1mul(&G1_ECP, &gsk);
 
     let challenge_hash = hash256(challenge);
 
-    let ECPProof { c, s } = make_ecp_proof(rng, &join_msg.q, &gsk, &challenge_hash);
-    join_msg.c = c;
-    join_msg.s = s;
+    let proof = make_ecp_proof(rng, &q, &gsk, &challenge_hash);
 
     StartJoinResult {
         gsk: CredentialBIG(gsk),
-        join_msg,
+        join_msg: JoinRequest { q, proof },
     }
 }
 
-pub fn join_finish_client_internal(
+pub fn finish_join(
     pub_key: &GroupPublicKey,
     gsk: &CredentialBIG,
     resp: JoinResponse,
@@ -186,7 +126,7 @@ pub fn join_finish_client_internal(
     let mut rng = RAND::new();
     rng.seed(big::MODBYTES, &gsk.to_bytes());
 
-    if !verify_ecp_proof_equals(&G1_ECP, &q, &resp.cred.b, &resp.cred.d, &resp.c, &resp.s) {
+    if !verify_ecp_proof_equals(&G1_ECP, &q, &resp.cred.b, &resp.cred.d, &resp.proof) {
         return Err(CredentialError::JoinResponseValidation);
     }
 
