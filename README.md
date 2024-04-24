@@ -1,5 +1,7 @@
 # anonymous-credentials
 
+[![Crates.io](https://img.shields.io/crates/v/anonymous-credentials?style=for-the-badge)](https://crates.io/crates/anonymous-credentials)
+
 Provides implementation of Direct Anonymous Attestation (DAA) for the Web Discovery Project. Performs the same elliptic curve operations as the [original C library](https://github.com/whotracksme/anonymous-credentials).
 
 bn254 is the only supported curve for this library.
