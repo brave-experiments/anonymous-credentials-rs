@@ -1,7 +1,13 @@
 [package]
-name = "web-discovery-project"
+name = "anonymous-credentials"
 version = "0.1.0"
 edition = "2021"
+authors = ["Darnell Andries <dandries@brave.com>"]
+description = "Implementation of Direct Anonymous Attestation for the Web Discovery Project"
+license = "MPL-2.0"
+repository = "https://github.com/brave-experiments/anonymous-credentials-rs"
+keywords = ["daa", "credentials", "bn254"]
+categories = ["cryptography"]
 
 [dependencies]
 lazy_static = "1.4"
