@@ -18,64 +18,64 @@ pub const GROUP_PUBLIC_KEY_SIZE: usize = ECP2_COMPAT_SIZE * 2 + big::MODBYTES * 
 pub const SIGNATURE_SIZE: usize = ECP_SIZE * 5 + ECP_PROOF_SIZE;
 
 pub struct JoinRequest {
-    pub q: ECP, // G1 ** gsk
+    pub(crate) q: ECP, // G1 ** gsk
 
-    pub proof: ECPProof,
+    pub(crate) proof: ECPProof,
 }
 
 pub struct JoinResponse {
-    pub cred: UserCredentials,
-    pub proof: ECPProof,
+    pub(crate) cred: UserCredentials,
+    pub(crate) proof: ECPProof,
 }
 
 pub struct UserCredentials {
-    pub a: ECP,
-    pub b: ECP,
-    pub c: ECP,
-    pub d: ECP,
+    pub(crate) a: ECP,
+    pub(crate) b: ECP,
+    pub(crate) c: ECP,
+    pub(crate) d: ECP,
 }
 
 pub struct Signature {
-    pub a: ECP,
-    pub b: ECP,
-    pub c: ECP,
-    pub d: ECP,
-    pub nym: ECP,
+    pub(crate) a: ECP,
+    pub(crate) b: ECP,
+    pub(crate) c: ECP,
+    pub(crate) d: ECP,
+    pub(crate) nym: ECP,
 
-    pub proof: ECPProof,
+    pub(crate) proof: ECPProof,
 }
 
 pub struct GroupPublicKey {
-    pub x: ECP2, // G2 ** x
-    pub y: ECP2, // G2 ** y
+    pub(crate) x: ECP2, // G2 ** x
+    pub(crate) y: ECP2, // G2 ** y
 
     // ZK of discrete-log knowledge for X and Y
-    pub cx: BIG,
-    pub sx: BIG,
-    pub cy: BIG,
-    pub sy: BIG,
+    pub(crate) cx: BIG,
+    pub(crate) sx: BIG,
+    pub(crate) cy: BIG,
+    pub(crate) sy: BIG,
 }
 
 pub struct ECPProof {
-    pub c: BIG,
-    pub s: BIG,
+    pub(crate) c: BIG,
+    pub(crate) s: BIG,
 }
 
-pub struct CredentialBIG(pub BIG);
+pub struct CredentialBIG(pub(crate) BIG);
 
 pub struct StartJoinResult {
     pub gsk: CredentialBIG,
     pub join_msg: JoinRequest,
 }
 
-pub fn ecp_from_bytes(bytes: &[u8]) -> Result<ECP, CredentialError> {
+pub(crate) fn ecp_from_bytes(bytes: &[u8]) -> Result<ECP, CredentialError> {
     if bytes.len() != ECP_SIZE {
         return Err(CredentialError::BadECP);
     }
     Ok(ECP::frombytes(bytes))
 }
 
-pub fn ecp2_from_compat_bytes(bytes: &[u8]) -> Result<ECP2, CredentialError> {
+pub(crate) fn ecp2_from_compat_bytes(bytes: &[u8]) -> Result<ECP2, CredentialError> {
     if bytes.len() != ECP2_COMPAT_SIZE {
         return Err(CredentialError::BadECP2);
     }
@@ -90,7 +90,23 @@ pub fn ecp2_from_compat_bytes(bytes: &[u8]) -> Result<ECP2, CredentialError> {
     Ok(ECP2::new_fp2s(&x, &y))
 }
 
-pub fn big_from_bytes(bytes: &[u8]) -> Result<BIG, CredentialError> {
+pub(crate) fn ecp2_to_compat_bytes(point: &ECP2) -> [u8; ECP2_COMPAT_SIZE] {
+    let mut result = [0u8; ECP2_COMPAT_SIZE];
+
+    let mut x = point.getx();
+    let mut y = point.gety();
+
+    x.geta().tobytes(&mut result[..big::MODBYTES]);
+    x.getb()
+        .tobytes(&mut result[big::MODBYTES..big::MODBYTES * 2]);
+    y.geta()
+        .tobytes(&mut result[big::MODBYTES * 2..big::MODBYTES * 3]);
+    y.getb().tobytes(&mut result[big::MODBYTES * 3..]);
+
+    result
+}
+
+pub(crate) fn big_from_bytes(bytes: &[u8]) -> Result<BIG, CredentialError> {
     if bytes.len() != big::MODBYTES {
         return Err(CredentialError::BadBIG);
     }

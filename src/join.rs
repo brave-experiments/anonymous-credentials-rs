@@ -4,23 +4,20 @@ use brave_miracl::{
         ecp::ECP,
         ecp2::ECP2,
         fp12::FP12,
-        pair::g1mul,
+        pair::{g1mul, g2mul},
     },
     rand::RAND,
 };
 
+use super::data::{
+    ecp2_to_compat_bytes, CredentialBIG, ECPProof, GroupPublicKey, JoinRequest, JoinResponse,
+    StartJoinResult, UserCredentials, ECP2_COMPAT_SIZE, ECP_SIZE,
+};
 use super::util::{
     ecp_challenge_equals, hash256, pair_normalized_triple_ate, random_mod_curve_order,
     CURVE_ORDER_BIG, G1_ECP, G2_ECP,
 };
-use super::Result;
-use super::{
-    data::{
-        CredentialBIG, ECPProof, GroupPublicKey, JoinRequest, JoinResponse, StartJoinResult,
-        UserCredentials, ECP_SIZE,
-    },
-    CredentialError,
-};
+use super::{CredentialError, Result};
 
 fn ecp_challenge(message: &[u8; big::MODBYTES], y: &ECP, g: &ECP, gr: &ECP) -> BIG {
     let mut all_bytes = [0u8; ECP_SIZE * 3 + big::MODBYTES];
@@ -121,6 +118,8 @@ pub fn finish_join(
     gsk: &CredentialBIG,
     resp: JoinResponse,
 ) -> Result<UserCredentials> {
+    verify_group_public_key(pub_key)?;
+
     let q = g1mul(&G1_ECP, &gsk.0);
 
     let mut rng = RAND::new();
@@ -143,4 +142,39 @@ pub fn finish_join(
     }
 
     Ok(resp.cred)
+}
+
+fn ecp2_challenge(y: &ECP2, g: &ECP2, gr: &ECP2) -> BIG {
+    let mut all_bytes = [0u8; ECP2_COMPAT_SIZE * 3];
+
+    all_bytes[..ECP2_COMPAT_SIZE].copy_from_slice(&ecp2_to_compat_bytes(y));
+    all_bytes[ECP2_COMPAT_SIZE..ECP2_COMPAT_SIZE * 2].copy_from_slice(&ecp2_to_compat_bytes(g));
+    all_bytes[ECP2_COMPAT_SIZE * 2..].copy_from_slice(&ecp2_to_compat_bytes(gr));
+
+    let hash = hash256(&all_bytes);
+
+    let mut c = BIG::frombytes(&hash);
+    c.rmod(&CURVE_ORDER_BIG);
+    c
+}
+
+fn verify_ecp2_proof(y: &ECP2, c: &BIG, s: &BIG) -> bool {
+    let cn = BIG::modneg(c, &CURVE_ORDER_BIG);
+
+    let mut gs = g2mul(&G2_ECP, s);
+    let yc = g2mul(y, &cn);
+
+    gs.add(&yc);
+
+    let cc = ecp2_challenge(y, &G2_ECP, &gs);
+
+    BIG::comp(c, &cc) == 0
+}
+
+fn verify_group_public_key(key: &GroupPublicKey) -> Result<()> {
+    match verify_ecp2_proof(&key.x, &key.cx, &key.sx) && verify_ecp2_proof(&key.y, &key.cy, &key.sy)
+    {
+        true => Ok(()),
+        false => Err(CredentialError::BadGroupPublicKey),
+    }
 }

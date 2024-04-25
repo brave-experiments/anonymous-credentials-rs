@@ -7,11 +7,7 @@ use brave_miracl::{bn254::big, rand::RAND};
 use rand::{rngs::OsRng, RngCore};
 use thiserror::Error;
 
-use self::data::{
-    CredentialBIG, GroupPublicKey, JoinResponse, Signature, StartJoinResult, UserCredentials,
-    ECP2_COMPAT_SIZE, ECP_PROOF_SIZE, ECP_SIZE, GROUP_PUBLIC_KEY_SIZE, JOIN_RESPONSE_SIZE,
-    USER_CREDENTIALS_SIZE,
-};
+pub use self::data::*;
 use self::join::{finish_join, start_join};
 use self::sign::sign;
 
@@ -35,6 +31,8 @@ pub enum CredentialError {
     JoinResponseValidation,
     #[error("Private key and/or credentials not set")]
     CredentialsNotSet,
+    #[error("Group public key verification failed")]
+    BadGroupPublicKey,
 }
 
 pub type Result<T> = std::result::Result<T, CredentialError>;
