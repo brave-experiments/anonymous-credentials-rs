@@ -3,7 +3,7 @@ mod join;
 mod sign;
 mod util;
 
-use brave_miracl::{bn254::big, rand::RAND};
+use brave_miracl::rand::RAND;
 use rand::{rngs::OsRng, RngCore};
 use thiserror::Error;
 
@@ -17,7 +17,7 @@ pub enum CredentialError {
     BadECP,
     #[error("ECP2 should be {0} bytes", ECP2_COMPAT_SIZE)]
     BadECP2,
-    #[error("BIG should be {0} bytes", big::MODBYTES)]
+    #[error("BIG should be {0} bytes", BIG_SIZE)]
     BadBIG,
     #[error("ECP proof should be {0} bytes", ECP_PROOF_SIZE)]
     BadECPProof,

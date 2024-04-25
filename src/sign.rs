@@ -1,20 +1,16 @@
 use brave_miracl::{
-    bn254::{
-        big::{self, BIG},
-        ecp::ECP,
-        pair::g1mul,
-    },
+    bn254::{big::BIG, ecp::ECP, pair::g1mul},
     rand::RAND,
 };
 
 use super::{
-    data::{CredentialBIG, ECPProof, Signature, UserCredentials},
+    data::{CredentialBIG, ECPProof, Signature, UserCredentials, BIG_SIZE},
     util::{ecp_challenge_equals, hash256, random_mod_curve_order, CURVE_ORDER_BIG},
 };
 
 fn make_ecp_proof_equals(
     rng: &mut RAND,
-    message: &[u8; big::MODBYTES],
+    message: &[u8; BIG_SIZE],
     a: &ECP,
     b: &ECP,
     y: &ECP,
@@ -55,9 +51,9 @@ pub fn sign(
     let nym = g1mul(&bsn_point, &gsk.0);
 
     // Compute H(H(msg) || H(bsn)) to be used in proof of equality
-    let mut msg_bsn_hash_data = [0u8; big::MODBYTES * 2];
-    msg_bsn_hash_data[..big::MODBYTES].copy_from_slice(&hash256(msg));
-    msg_bsn_hash_data[big::MODBYTES..].copy_from_slice(&hash256(bsn));
+    let mut msg_bsn_hash_data = [0u8; BIG_SIZE * 2];
+    msg_bsn_hash_data[..BIG_SIZE].copy_from_slice(&hash256(msg));
+    msg_bsn_hash_data[BIG_SIZE..].copy_from_slice(&hash256(bsn));
     let msg_bsn_hash = hash256(&msg_bsn_hash_data);
 
     let proof = make_ecp_proof_equals(rng, &msg_bsn_hash, &b, &bsn_point, &d, &nym, &gsk.0);

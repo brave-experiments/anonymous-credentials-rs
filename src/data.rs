@@ -7,14 +7,15 @@ use brave_miracl::bn254::{
 
 use super::CredentialError;
 
-pub const ECP_SIZE: usize = big::MODBYTES * 2 + 1;
-pub const ECP2_COMPAT_SIZE: usize = big::MODBYTES * 4;
+pub const BIG_SIZE: usize = big::MODBYTES;
+pub const ECP_SIZE: usize = BIG_SIZE * 2 + 1;
+pub const ECP2_COMPAT_SIZE: usize = BIG_SIZE * 4;
 
-pub const ECP_PROOF_SIZE: usize = big::MODBYTES * 2;
+pub const ECP_PROOF_SIZE: usize = BIG_SIZE * 2;
 pub const JOIN_REQUEST_SIZE: usize = ECP_SIZE + ECP_PROOF_SIZE;
 pub const USER_CREDENTIALS_SIZE: usize = ECP_SIZE * 4;
 pub const JOIN_RESPONSE_SIZE: usize = USER_CREDENTIALS_SIZE + ECP_PROOF_SIZE;
-pub const GROUP_PUBLIC_KEY_SIZE: usize = ECP2_COMPAT_SIZE * 2 + big::MODBYTES * 4;
+pub const GROUP_PUBLIC_KEY_SIZE: usize = ECP2_COMPAT_SIZE * 2 + BIG_SIZE * 4;
 pub const SIGNATURE_SIZE: usize = ECP_SIZE * 5 + ECP_PROOF_SIZE;
 
 pub struct JoinRequest {
@@ -80,12 +81,12 @@ pub(crate) fn ecp2_from_compat_bytes(bytes: &[u8]) -> Result<ECP2, CredentialErr
         return Err(CredentialError::BadECP2);
     }
     let x = FP2::new_bigs(
-        &big_from_bytes(&bytes[..big::MODBYTES])?,
-        &big_from_bytes(&bytes[big::MODBYTES..big::MODBYTES * 2])?,
+        &big_from_bytes(&bytes[..BIG_SIZE])?,
+        &big_from_bytes(&bytes[BIG_SIZE..BIG_SIZE * 2])?,
     );
     let y = FP2::new_bigs(
-        &big_from_bytes(&bytes[big::MODBYTES * 2..big::MODBYTES * 3])?,
-        &big_from_bytes(&bytes[big::MODBYTES * 3..big::MODBYTES * 4])?,
+        &big_from_bytes(&bytes[BIG_SIZE * 2..BIG_SIZE * 3])?,
+        &big_from_bytes(&bytes[BIG_SIZE * 3..BIG_SIZE * 4])?,
     );
     Ok(ECP2::new_fp2s(&x, &y))
 }
@@ -96,18 +97,16 @@ pub(crate) fn ecp2_to_compat_bytes(point: &ECP2) -> [u8; ECP2_COMPAT_SIZE] {
     let mut x = point.getx();
     let mut y = point.gety();
 
-    x.geta().tobytes(&mut result[..big::MODBYTES]);
-    x.getb()
-        .tobytes(&mut result[big::MODBYTES..big::MODBYTES * 2]);
-    y.geta()
-        .tobytes(&mut result[big::MODBYTES * 2..big::MODBYTES * 3]);
-    y.getb().tobytes(&mut result[big::MODBYTES * 3..]);
+    x.geta().tobytes(&mut result[..BIG_SIZE]);
+    x.getb().tobytes(&mut result[BIG_SIZE..BIG_SIZE * 2]);
+    y.geta().tobytes(&mut result[BIG_SIZE * 2..BIG_SIZE * 3]);
+    y.getb().tobytes(&mut result[BIG_SIZE * 3..]);
 
     result
 }
 
 pub(crate) fn big_from_bytes(bytes: &[u8]) -> Result<BIG, CredentialError> {
-    if bytes.len() != big::MODBYTES {
+    if bytes.len() != BIG_SIZE {
         return Err(CredentialError::BadBIG);
     }
     Ok(BIG::frombytes(bytes))
@@ -157,21 +156,17 @@ impl TryFrom<&[u8]> for GroupPublicKey {
         Ok(GroupPublicKey {
             x: ecp2_from_compat_bytes(&bytes[..ECP2_COMPAT_SIZE])?,
             y: ecp2_from_compat_bytes(&bytes[ECP2_COMPAT_SIZE..ECP2_COMPAT_SIZE * 2])?,
-            cx: big_from_bytes(&bytes[big_start..big_start + big::MODBYTES])?,
-            sx: big_from_bytes(&bytes[big_start + big::MODBYTES..big_start + big::MODBYTES * 2])?,
-            cy: big_from_bytes(
-                &bytes[big_start + big::MODBYTES * 2..big_start + big::MODBYTES * 3],
-            )?,
-            sy: big_from_bytes(
-                &bytes[big_start + big::MODBYTES * 3..big_start + big::MODBYTES * 4],
-            )?,
+            cx: big_from_bytes(&bytes[big_start..big_start + BIG_SIZE])?,
+            sx: big_from_bytes(&bytes[big_start + BIG_SIZE..big_start + BIG_SIZE * 2])?,
+            cy: big_from_bytes(&bytes[big_start + BIG_SIZE * 2..big_start + BIG_SIZE * 3])?,
+            sy: big_from_bytes(&bytes[big_start + BIG_SIZE * 3..big_start + BIG_SIZE * 4])?,
         })
     }
 }
 
 impl CredentialBIG {
-    pub fn to_bytes(&self) -> [u8; big::MODBYTES] {
-        let mut bytes = [0u8; big::MODBYTES];
+    pub fn to_bytes(&self) -> [u8; BIG_SIZE] {
+        let mut bytes = [0u8; BIG_SIZE];
         self.0.tobytes(&mut bytes);
         bytes
     }
@@ -210,8 +205,8 @@ impl UserCredentials {
 impl ECPProof {
     pub fn to_bytes(&self) -> [u8; ECP_PROOF_SIZE] {
         let mut result = [0u8; ECP_PROOF_SIZE];
-        self.c.tobytes(&mut result[..big::MODBYTES]);
-        self.s.tobytes(&mut result[big::MODBYTES..]);
+        self.c.tobytes(&mut result[..BIG_SIZE]);
+        self.s.tobytes(&mut result[BIG_SIZE..]);
         result
     }
 }
@@ -225,8 +220,8 @@ impl TryFrom<&[u8]> for ECPProof {
         }
 
         Ok(ECPProof {
-            c: big_from_bytes(&bytes[0..big::MODBYTES])?,
-            s: big_from_bytes(&bytes[big::MODBYTES..])?,
+            c: big_from_bytes(&bytes[0..BIG_SIZE])?,
+            s: big_from_bytes(&bytes[BIG_SIZE..])?,
         })
     }
 }

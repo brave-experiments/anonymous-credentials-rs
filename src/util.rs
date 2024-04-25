@@ -1,6 +1,6 @@
 use brave_miracl::{
     bn254::{
-        big::{self, BIG},
+        big::BIG,
         ecp::ECP,
         ecp2::ECP2,
         fp12::FP12,
@@ -13,7 +13,7 @@ use brave_miracl::{
 };
 use lazy_static::lazy_static;
 
-use super::data::ECP_SIZE;
+use super::data::{BIG_SIZE, ECP_SIZE};
 
 lazy_static! {
     pub static ref G1_ECP: ECP = {
@@ -53,7 +53,7 @@ pub fn pair_normalized_triple_ate(p: &ECP2, q: &ECP, r: &ECP2, s: &ECP, t: &ECP2
 }
 
 pub fn ecp_challenge_equals(
-    message: Option<&[u8; big::MODBYTES]>,
+    message: Option<&[u8; BIG_SIZE]>,
     y: &ECP,
     z: &ECP,
     a: &ECP,
@@ -63,8 +63,8 @@ pub fn ecp_challenge_equals(
 ) -> BIG {
     let (mut all_bytes, msg_len) = match message {
         Some(message) => {
-            let mut all_bytes = vec![0u8; ECP_SIZE * 6 + big::MODBYTES];
-            all_bytes[..big::MODBYTES].copy_from_slice(message);
+            let mut all_bytes = vec![0u8; ECP_SIZE * 6 + BIG_SIZE];
+            all_bytes[..BIG_SIZE].copy_from_slice(message);
             (all_bytes, message.len())
         }
         None => (vec![0u8; ECP_SIZE * 6], 0),

@@ -1,6 +1,6 @@
 use brave_miracl::{
     bn254::{
-        big::{self, BIG},
+        big::BIG,
         ecp::ECP,
         ecp2::ECP2,
         fp12::FP12,
@@ -11,7 +11,7 @@ use brave_miracl::{
 
 use super::data::{
     ecp2_to_compat_bytes, CredentialBIG, ECPProof, GroupPublicKey, JoinRequest, JoinResponse,
-    StartJoinResult, UserCredentials, ECP2_COMPAT_SIZE, ECP_SIZE,
+    StartJoinResult, UserCredentials, BIG_SIZE, ECP2_COMPAT_SIZE, ECP_SIZE,
 };
 use super::util::{
     ecp_challenge_equals, hash256, pair_normalized_triple_ate, random_mod_curve_order,
@@ -19,14 +19,14 @@ use super::util::{
 };
 use super::{CredentialError, Result};
 
-fn ecp_challenge(message: &[u8; big::MODBYTES], y: &ECP, g: &ECP, gr: &ECP) -> BIG {
-    let mut all_bytes = [0u8; ECP_SIZE * 3 + big::MODBYTES];
+fn ecp_challenge(message: &[u8; BIG_SIZE], y: &ECP, g: &ECP, gr: &ECP) -> BIG {
+    let mut all_bytes = [0u8; ECP_SIZE * 3 + BIG_SIZE];
 
-    all_bytes[..big::MODBYTES].copy_from_slice(message);
+    all_bytes[..BIG_SIZE].copy_from_slice(message);
 
-    y.tobytes(&mut all_bytes[big::MODBYTES..], false);
-    g.tobytes(&mut all_bytes[ECP_SIZE + big::MODBYTES..], false);
-    gr.tobytes(&mut all_bytes[ECP_SIZE * 2 + big::MODBYTES..], false);
+    y.tobytes(&mut all_bytes[BIG_SIZE..], false);
+    g.tobytes(&mut all_bytes[ECP_SIZE + BIG_SIZE..], false);
+    gr.tobytes(&mut all_bytes[ECP_SIZE * 2 + BIG_SIZE..], false);
 
     let hash = hash256(&all_bytes);
 
@@ -35,7 +35,7 @@ fn ecp_challenge(message: &[u8; big::MODBYTES], y: &ECP, g: &ECP, gr: &ECP) -> B
     c
 }
 
-fn make_ecp_proof(rng: &mut RAND, y: &ECP, x: &BIG, message: &[u8; big::MODBYTES]) -> ECPProof {
+fn make_ecp_proof(rng: &mut RAND, y: &ECP, x: &BIG, message: &[u8; BIG_SIZE]) -> ECPProof {
     let r = random_mod_curve_order(rng);
 
     let g = G1_ECP.clone();
@@ -123,7 +123,7 @@ pub fn finish_join(
     let q = g1mul(&G1_ECP, &gsk.0);
 
     let mut rng = RAND::new();
-    rng.seed(big::MODBYTES, &gsk.to_bytes());
+    rng.seed(BIG_SIZE, &gsk.to_bytes());
 
     if !verify_ecp_proof_equals(&G1_ECP, &q, &resp.cred.b, &resp.cred.d, &resp.proof) {
         return Err(CredentialError::JoinResponseValidation);
